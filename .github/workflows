@@ -1,0 +1,48 @@
+name: Deploy Backend to EC2
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  DEPLOY_PATH: /opt/simit
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H ${{ secrets.EC2_HOST }} >> ~/.ssh/known_hosts
+
+      - name: Copy files to EC2
+        run: |
+          scp -i ~/.ssh/deploy_key \
+            docker-compose.prod.yml \
+            nginx/default.conf \
+            scripts/deploy-backend.sh \
+            ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}:/tmp/
+
+      - name: Execute deploy script
+        run: |
+          ssh -i ~/.ssh/deploy_key ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} << 'ENDSSH'
+            sudo mkdir -p /opt/simit/nginx
+            sudo mv /tmp/docker-compose.prod.yml /opt/simit/
+            sudo mv /tmp/default.conf /opt/simit/nginx/
+            sudo mv /tmp/deploy-backend.sh /opt/simit/scripts/
+            sudo chmod +x /opt/simit/scripts/deploy-backend.sh
+
+            cd /opt/simit
+            sudo bash scripts/deploy-backend.sh
+          ENDSSH
+
+      - name: Cleanup SSH
+        if: always()
+        run: rm -rf ~/.ssh/deploy_key
